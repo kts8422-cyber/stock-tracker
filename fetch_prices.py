@@ -6,7 +6,6 @@ if not FINNHUB_KEY:
     print("ERROR: FINNHUB_KEY 없음")
     sys.exit(1)
 
-# 한국시간(KST = UTC+9) 기준
 KST = timezone(timedelta(hours=9))
 today = datetime.now(KST).strftime("%Y-%m-%d")
 print(f"날짜 (KST): {today}")
@@ -29,7 +28,7 @@ try:
     print(f"기존 data.json: {len(data)}일치 로드")
 except FileNotFoundError:
     data = {}
-    print("data.json 없음 → 새로 생성")
+    print("data.json 없음 -> 새로 생성")
 except Exception as e:
     data = {}
     print(f"로드 실패: {e}")
@@ -69,19 +68,19 @@ for stock_id, ticker in STOCKS:
     time.sleep(0.4)
 
 try:
+    sorted_keys = sorted(data.keys())
+    lines = []
+    lines.append("{")
+    for i, key in enumerate(sorted_keys):
+        val = json.dumps(data[key], separators=(",", ":"), ensure_ascii=False)
+        comma = "," if i < len(sorted_keys) - 1 else ""
+        lines.append(f'  "{key}":{val}{comma}')
+    lines.append("}")
+    output = "\n".join(lines)
     with open("data.json", "w", encoding="utf-8") as f:
-        # 날짜별로 개행해서 저장
-        f.write("{
-")
-        sorted_keys = sorted(data.keys())
-        for i, key in enumerate(sorted_keys):
-            line = json.dumps(data[key], separators=(",", ":"), ensure_ascii=False)
-            comma = "," if i < len(sorted_keys) - 1 else ""
-            f.write(f'  "{key}":{line}{comma}
-')
-        f.write("}")
-    print(f"\n저장 완료: {today} / 성공 {success}개 / 실패 {failed}개")
-    print(f"전체 날짜: {sorted(data.keys())}")
+        f.write(output)
+    print(f"저장 완료: {today} / 성공 {success}개 / 실패 {failed}개")
+    print(f"전체 날짜: {sorted_keys}")
 except Exception as e:
     print(f"저장 실패: {e}")
     sys.exit(1)
