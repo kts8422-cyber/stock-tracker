@@ -1,10 +1,9 @@
-# Daily Stock Fetch - updated
+# SectorTrack - Daily Stock Price Fetcher v3
 name: Daily Stock Fetch
 
 on:
   schedule:
-    - cron: "0 22 * * 1-5"   # 한국시간 07:00 (장 시작 전)
-    - cron: "0 13 * * 1-5"   # 한국시간 22:00 (장 마감 후 종가)
+    - cron: "*/5 * * * *"   # 5분마다 (테스트용)
   workflow_dispatch:
 
 jobs:
@@ -24,14 +23,6 @@ jobs:
 
       - name: Install deps
         run: pip install requests
-
-      - name: Check secret
-        run: |
-          if [ -z "${{ secrets.FINNHUB_KEY }}" ]; then
-            echo "ERROR: FINNHUB_KEY secret is not set!"
-            exit 1
-          fi
-          echo "Secret OK"
 
       - name: Fetch prices
         env:
