@@ -1,0 +1,41 @@
+# SectorTrack - Daily Stock Price Fetcher v5
+name: Daily Stock Fetch
+
+on:
+  schedule:
+    - cron: "0 22 * * 1-5"   # KST 07:00 (월~금)
+    - cron: "0 4 * * 1-5"    # KST 13:00 (월~금)
+    - cron: "0 8 * * 1-5"    # KST 17:00 (월~금)
+    - cron: "0 12 * * 1-5"   # KST 21:00 (월~금)
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Fetch prices
+        env:
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
+        run: python fetch_prices.py
+
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          git diff --cached --quiet || git commit -m "auto: price update $(date -u +%Y-%m-%d\ %H:%M)"
+          git push
