@@ -533,7 +533,11 @@ let tableBaseDate='',tableCompareDate='';
 let currentView='calendar',chartInstance=null;
 let selectedChartTab='섹터별'; // 첫 탭
 let _cancel=false;
-const TODAY=new Date().toISOString().slice(0,10);
+// ET 기준 오늘 날짜 (UTC-4 서머타임)
+const ET_OFFSET = -4 * 60;
+const now = new Date();
+const etNow = new Date(now.getTime() + (ET_OFFSET - (-now.getTimezoneOffset())) * 60000);
+const TODAY = etNow.toISOString().slice(0,10);
 const totalStocks=SECTORS.reduce((a,s)=>a+s.stocks.length,0);
 
 // ── PERSIST ──
