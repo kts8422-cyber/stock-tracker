@@ -300,19 +300,27 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);overscroll-b
     <div class="pw-dot" id="d3"></div>
   </div>
   <div class="pw-error" id="pwError"></div>
-  <div class="pw-pad">
-    <button class="pw-btn" onclick="pwInput('1')">1</button>
-    <button class="pw-btn" onclick="pwInput('2')">2<span class="sub">ABC</span></button>
-    <button class="pw-btn" onclick="pwInput('3')">3<span class="sub">DEF</span></button>
-    <button class="pw-btn" onclick="pwInput('4')">4<span class="sub">GHI</span></button>
-    <button class="pw-btn" onclick="pwInput('5')">5<span class="sub">JKL</span></button>
-    <button class="pw-btn" onclick="pwInput('6')">6<span class="sub">MNO</span></button>
-    <button class="pw-btn" onclick="pwInput('7')">7<span class="sub">PQRS</span></button>
-    <button class="pw-btn" onclick="pwInput('8')">8<span class="sub">TUV</span></button>
-    <button class="pw-btn" onclick="pwInput('9')">9<span class="sub">WXYZ</span></button>
+  <div id="pwLoadingMsg" style="display:none;text-align:center;width:260px;margin-top:-8px">
+    <div style="font-family:var(--mono);font-size:.76rem;color:var(--accent);margin-bottom:12px">📡 데이터 불러오는 중...</div>
+    <div style="background:#1c2a3e;border-radius:6px;height:6px;overflow:hidden;margin-bottom:8px">
+      <div id="pwProgressBar" style="background:var(--accent);height:100%;width:0%;transition:width .3s;border-radius:6px"></div>
+    </div>
+    <div id="pwProgressPct" style="font-family:var(--mono);font-size:.68rem;color:var(--text2);margin-bottom:8px">0%</div>
+    <div style="font-family:var(--mono);font-size:.64rem;color:var(--text3)">로딩이 완료되면 화면이 열립니다</div>
+  </div>
+  <div class="pw-pad" id="pwPad">
+    <button class="pw-btn" data-num="1">1</button>
+    <button class="pw-btn" data-num="2">2<span class="sub">ABC</span></button>
+    <button class="pw-btn" data-num="3">3<span class="sub">DEF</span></button>
+    <button class="pw-btn" data-num="4">4<span class="sub">GHI</span></button>
+    <button class="pw-btn" data-num="5">5<span class="sub">JKL</span></button>
+    <button class="pw-btn" data-num="6">6<span class="sub">MNO</span></button>
+    <button class="pw-btn" data-num="7">7<span class="sub">PQRS</span></button>
+    <button class="pw-btn" data-num="8">8<span class="sub">TUV</span></button>
+    <button class="pw-btn" data-num="9">9<span class="sub">WXYZ</span></button>
     <div class="pw-btn empty"></div>
-    <button class="pw-btn" onclick="pwInput('0')">0</button>
-    <button class="pw-btn del" onclick="pwDelete()">⌫</button>
+    <button class="pw-btn" data-num="0">0</button>
+    <button class="pw-btn del" id="pwDelBtn">⌫</button>
   </div>
 </div>
 
@@ -567,7 +575,11 @@ function save(){
 }
 
 // ── REMOTE ──
-async function loadRemote(){
+async function loadRemote(onProgress){
+  const step = onProgress || (()=>{});
+
+  // Step 1: data.json (40%)
+  step(10, 'data.json 로드 중...');
   try{
     const r=await fetch('./data.json?t='+Date.now(),{
       cache:'no-store',
@@ -579,15 +591,18 @@ async function loadRemote(){
       if(dates[0]) document.getElementById('lastSyncDate').textContent=dates[0];
     }
   }catch(e){ console.warn('data.json 로드 실패:', e); }
+  step(50, 'profile.json 로드 중...');
 
-  // profile.json 로드 (발행주식수)
+  // Step 2: profile.json (80%)
   try{
     const r=await fetch('./profile.json?t='+Date.now(),{cache:'no-store'});
     if(r.ok) profileData=await r.json();
   }catch(e){ console.warn('profile.json 로드 실패:', e); }
+  step(80, '환율 불러오는 중...');
 
-  // 환율 로드 (Finnhub forex)
+  // Step 3: 환율 (100%)
   await fetchExchangeRate();
+  step(100, '완료');
 }
 
 async function fetchExchangeRate(){
@@ -1142,43 +1157,74 @@ const PW = '8282';
 let pwValue = '';
 
 function pwInput(n){
-  if(pwValue.length>=4) return;
-  pwValue+=n;
-  updateDots();
-  if(pwValue.length===4) setTimeout(checkPw,80);
+  try{
+    if(pwValue.length>=4) return;
+    pwValue+=n;
+    updateDots();
+    if(pwValue.length===4) setTimeout(checkPw,80);
+  }catch(e){console.error('pwInput error:',e);}
 }
 function pwDelete(){
-  pwValue=pwValue.slice(0,-1);
-  updateDots();
-  document.getElementById('pwError').textContent='';
+  try{
+    pwValue=pwValue.slice(0,-1);
+    updateDots();
+    document.getElementById('pwError').textContent='';
+  }catch(e){console.error('pwDelete error:',e);}
 }
 function updateDots(){
-  for(let i=0;i<4;i++){
-    document.getElementById('d'+i).classList.toggle('filled', i<pwValue.length);
-  }
+  try{
+    for(let i=0;i<4;i++){
+      const el=document.getElementById('d'+i);
+      if(el) el.classList.toggle('filled', i<pwValue.length);
+    }
+  }catch(e){console.error('updateDots error:',e);}
 }
 function checkPw(){
-  if(pwValue===PW){
-    const el=document.getElementById('pwScreen');
-    el.style.transition='opacity .3s';
-    el.style.opacity='0';
-    setTimeout(()=>{
-      el.style.display='none';
-      renderAll(); // 인증 후 화면 렌더링
-    },300);
-    sessionStorage.setItem('st_auth','1');
-  } else {
-    document.getElementById('pwError').textContent='비밀번호가 틀렸습니다';
-    // 진동
-    if(navigator.vibrate) navigator.vibrate([100,50,100]);
-    // 흔들기
-    const dots=document.getElementById('pwDots');
-    dots.style.animation='none';
-    dots.offsetHeight;
-    dots.style.animation='shake .4s ease';
-    pwValue='';
-    setTimeout(()=>updateDots(),400);
-  }
+  try{
+    if(pwValue===PW){
+      sessionStorage.setItem('st_auth','1');
+      // 패드 숨기고 로딩 메시지 표시
+      const padEl=document.getElementById('pwPad');
+      const delEl=document.getElementById('pwDelBtn');
+      const dotsEl=document.getElementById('pwDots');
+      if(padEl) padEl.style.display='none';
+      if(delEl) delEl.style.display='none';
+      if(dotsEl) dotsEl.style.display='none';
+      const loadMsg=document.getElementById('pwLoadingMsg');
+      if(loadMsg) loadMsg.style.display='block';
+
+      // 데이터 로드 후 화면 전환 (진행률 표시)
+      (async()=>{
+        const bar = document.getElementById('pwProgressBar');
+        const pct = document.getElementById('pwProgressPct');
+        await loadRemote((progress)=>{
+          if(bar) bar.style.width = progress + '%';
+          if(pct) pct.textContent = progress + '%';
+        });
+        const el=document.getElementById('pwScreen');
+        if(el){
+          el.style.transition='opacity .4s';
+          el.style.opacity='0';
+          setTimeout(()=>{
+            el.style.display='none';
+            try{ renderAll(); }catch(e){ console.error('renderAll error:',e); }
+          },400);
+        }
+      })();
+    } else {
+      const errEl=document.getElementById('pwError');
+      if(errEl) errEl.textContent='비밀번호가 틀렸습니다';
+      try{ if(navigator.vibrate) navigator.vibrate([100,50,100]); }catch(e){}
+      const dots=document.getElementById('pwDots');
+      if(dots){
+        dots.style.animation='none';
+        dots.offsetHeight;
+        dots.style.animation='shake .4s ease';
+      }
+      pwValue='';
+      setTimeout(()=>updateDots(),400);
+    }
+  }catch(e){console.error('checkPw error:',e);}
 }
 
 // ── INIT ──
@@ -1188,18 +1234,35 @@ calYear=now.getFullYear();calMonth=now.getMonth();
 if(calYear<2025){calYear=2025;calMonth=0;}
 if(calYear>2030){calYear=2030;calMonth=11;}
 
+// 비밀번호 패드 이벤트 - DOMContentLoaded 후 안전하게 등록
+document.addEventListener('DOMContentLoaded', function(){
+  const pad = document.getElementById('pwPad');
+  if(pad){
+    pad.addEventListener('click', function(e){
+      const btn = e.target.closest('[data-num]');
+      if(btn) pwInput(btn.getAttribute('data-num'));
+    });
+  }
+  const delBtn = document.getElementById('pwDelBtn');
+  if(delBtn) delBtn.addEventListener('click', pwDelete);
+});
+
 // 이미 인증됐으면 비밀번호 화면 숨기고 바로 로딩
 if(sessionStorage.getItem('st_auth')==='1'){
   document.getElementById('pwScreen').style.display='none';
   (async()=>{
     showLoad(true,'📡 데이터 불러오는 중...','');
-    await loadRemote();
+    await loadRemote((p)=>{
+      const bar=document.getElementById('loadBar');
+      const sub=document.getElementById('loadSub');
+      if(bar) bar.style.width=p+'%';
+      if(sub) sub.textContent=p+'%';
+    });
     showLoad(false);
     renderAll();
   })();
 } else {
-  // 비밀번호 화면 표시 중엔 백그라운드에서 조용히 로드 (로딩 오버레이 없이)
-  loadRemote().then(()=>{ /* 인증 후 renderAll 호출됨 */ });
+  // 비밀번호 화면 표시 중 - 인증 후 로드
 }
 </script>
 </body>
