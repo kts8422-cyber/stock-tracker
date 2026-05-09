@@ -1162,7 +1162,10 @@ function checkPw(){
     const el=document.getElementById('pwScreen');
     el.style.transition='opacity .3s';
     el.style.opacity='0';
-    setTimeout(()=>el.style.display='none',300);
+    setTimeout(()=>{
+      el.style.display='none';
+      renderAll(); // 인증 후 화면 렌더링
+    },300);
     sessionStorage.setItem('st_auth','1');
   } else {
     document.getElementById('pwError').textContent='비밀번호가 틀렸습니다';
@@ -1185,17 +1188,19 @@ calYear=now.getFullYear();calMonth=now.getMonth();
 if(calYear<2025){calYear=2025;calMonth=0;}
 if(calYear>2030){calYear=2030;calMonth=11;}
 
-// 이미 인증됐으면 비밀번호 화면 숨기기
+// 이미 인증됐으면 비밀번호 화면 숨기고 바로 로딩
 if(sessionStorage.getItem('st_auth')==='1'){
   document.getElementById('pwScreen').style.display='none';
+  (async()=>{
+    showLoad(true,'📡 데이터 불러오는 중...','');
+    await loadRemote();
+    showLoad(false);
+    renderAll();
+  })();
+} else {
+  // 비밀번호 화면 표시 중엔 백그라운드에서 조용히 로드 (로딩 오버레이 없이)
+  loadRemote().then(()=>{ /* 인증 후 renderAll 호출됨 */ });
 }
-// 앱 시작 시: 로딩 스피너 보여주고 data.json 먼저 완전히 불러온 뒤 렌더
-(async()=>{
-  showLoad(true,'📡 데이터 불러오는 중...','');
-  await loadRemote();
-  showLoad(false);
-  renderAll();
-})();
 </script>
 </body>
 </html>
