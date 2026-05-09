@@ -6,9 +6,10 @@ if not FINNHUB_KEY:
     print("ERROR: FINNHUB_KEY 없음")
     sys.exit(1)
 
-KST = timezone(timedelta(hours=9))
-today = datetime.now(KST).strftime("%Y-%m-%d")
-print(f"날짜 (KST): {today}")
+# 미국 동부시간(ET) 기준 - 서머타임 UTC-4
+ET = timezone(timedelta(hours=-4))
+today = datetime.now(ET).strftime("%Y-%m-%d")
+print(f"날짜 (ET): {today}")
 
 STOCKS = [
   # AI / 빅테크
@@ -55,16 +56,14 @@ for stock_id, ticker in STOCKS:
         r = requests.get(url, timeout=15)
         r.raise_for_status()
         q = r.json()
-        cur  = float(q.get("c",  0) or 0)
-        pc   = float(q.get("pc", 0) or 0)
-        open_= float(q.get("o",  0) or 0)
-        high = float(q.get("h",  0) or 0)
-        low  = float(q.get("l",  0) or 0)
+        cur   = float(q.get("c",  0) or 0)
+        pc    = float(q.get("pc", 0) or 0)
+        open_ = float(q.get("o",  0) or 0)
+        high  = float(q.get("h",  0) or 0)
+        low   = float(q.get("l",  0) or 0)
 
         if cur > 0:
-            # 현재가 (기존 HTML이 읽는 값 — 구조 그대로 유지)
             data[today][stock_id] = round(cur, 4)
-            # 시가/고가/저가 별도 키로 저장 (html은 아직 무시)
             if open_ > 0: data[today][stock_id+'_o'] = round(open_, 4)
             if high  > 0: data[today][stock_id+'_h'] = round(high,  4)
             if low   > 0: data[today][stock_id+'_l'] = round(low,   4)
