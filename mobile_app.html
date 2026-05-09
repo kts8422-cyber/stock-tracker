@@ -283,38 +283,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);overscroll-b
 </style>
 </head>
 <body>
-<!-- PASSWORD SCREEN -->
-<div id="pwScreen">
-  <div class="pw-logo">SECTOR<em>TRACK</em></div>
-  <div class="pw-label">비밀번호를 입력하세요</div>
-  <div class="pw-dots" id="pwDots">
-    <div class="pw-dot" id="d0"></div>
-    <div class="pw-dot" id="d1"></div>
-    <div class="pw-dot" id="d2"></div>
-    <div class="pw-dot" id="d3"></div>
-  </div>
-  <div class="pw-error" id="pwError"></div>
-  <div class="pw-loading" id="pwLoading">
-    <div class="pw-load-title">📡 데이터 불러오는 중...</div>
-    <div class="pw-load-bar-bg"><div class="pw-load-bar-fill" id="pwBar"></div></div>
-    <div class="pw-load-pct" id="pwPct">0%</div>
-    <div class="pw-load-hint">로딩이 완료되면<br>화면이 열립니다</div>
-  </div>
-  <div class="pw-pad" id="pwPad">
-    <button class="pw-btn" data-num="1">1</button>
-    <button class="pw-btn" data-num="2">2<span class="sub">ABC</span></button>
-    <button class="pw-btn" data-num="3">3<span class="sub">DEF</span></button>
-    <button class="pw-btn" data-num="4">4<span class="sub">GHI</span></button>
-    <button class="pw-btn" data-num="5">5<span class="sub">JKL</span></button>
-    <button class="pw-btn" data-num="6">6<span class="sub">MNO</span></button>
-    <button class="pw-btn" data-num="7">7<span class="sub">PQRS</span></button>
-    <button class="pw-btn" data-num="8">8<span class="sub">TUV</span></button>
-    <button class="pw-btn" data-num="9">9<span class="sub">WXYZ</span></button>
-    <div class="pw-btn empty"></div>
-    <button class="pw-btn" data-num="0">0</button>
-    <button class="pw-btn del" id="pwDelBtn">⌫</button>
-  </div>
-</div>
 <div class="app">
   <div class="app-header">
     <div class="app-logo">SECTOR<em>TRACK</em></div>
@@ -538,6 +506,605 @@ const now = new Date();
 const etNow = new Date(now.getTime() + (ET_OFFSET - (-now.getTimezoneOffset())) * 60000);
 const TODAY = etNow.toISOString().slice(0,10);
 const totalStocks=SECTORS.reduce((a,s)=>a+s.stocks.length,0);
+
+// ── PERSIST ──
+// localStorage는 오늘 현재가(prices)만 저장, 나머지는 data.json 의존
+function load(){
+  try{
+    const s=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');
+    // 오늘 날짜 데이터만 복원 (다른 날은 data.json에서)
+    if(s.todayPrices) prices[TODAY]=s.todayPrices;
+    if(s.detailPeriodDays) detailPeriodDays=s.detailPeriodDays;
+    if(s.tableBaseDate) tableBaseDate=s.tableBaseDate;
+    if(s.tableCompareDate) tableCompareDate=s.tableCompareDate;
+  }catch(e){}
+  // 기본값: 시작=1개월전, 종료=오늘
+  if(!tableBaseDate){
+    const idx=ALL_DATES.indexOf(TODAY);
+    tableBaseDate=idx>=21?ALL_DATES[idx+21]:ALL_DATES[ALL_DATES.length-1];
+  }
+  if(!tableCompareDate) tableCompareDate=TODAY;
+}
+function save(){
+  // 오늘 데이터만 localStorage에 저장
+  localStorage.setItem(STORAGE_KEY,JSON.stringify({
+    todayPrices: prices[TODAY]||{},
+    detailPeriodDays, tableBaseDate, tableCompareDate
+  }));
+}
+
+// ── REMOTE ──
+async function loadRemote(onProgress){
+  const _prog=onProgress||function(){};
+  try{
+    _prog(10);
+    const r=await fetch('./data.json?t='+Date.now());
+    if(r.ok){
+      remotePrices=await r.json();
+      const dates=Object.keys(remotePrices).sort().reverse();
+      if(dates[0]) document.getElementById('lastSyncDate').textContent=dates[0];
+    }
+  }catch(e){ console.warn('data.json 로드 실패:', e); }
+
+  _prog(50);
+  // profile.json 로드 (발행주식수)
+  try{
+    const r=await fetch('./profile.json?t='+Date.now());
+    if(r.ok) profileData=await r.json();
+  }catch(e){ console.warn('profile.json 로드 실패:', e); }
+
+  _prog(80);
+  // 환율 로드 (Finnhub forex)
+  await fetchExchangeRate();
+  _prog(100);
+}
+
+async function fetchExchangeRate(){
+  try{
+    const r=await fetch(`https://finnhub.io/api/v1/forex/rates?base=USD&token=${FINNHUB_KEY}`);
+    const d=await r.json();
+    const krw=d?.quote?.KRW;
+    if(krw && krw>0){
+      exchangeRate=krw;
+      document.getElementById('exchangeRateDisplay').textContent=
+        Math.round(krw).toLocaleString()+'원';
+    }
+  }catch(e){
+    document.getElementById('exchangeRateDisplay').textContent='1,380원';
+  }
+}
+
+// ── PRICE HELPERS ──
+function getPrice(sid,date){return prices[date]?.[sid]??remotePrices[date]?.[sid]??null;}
+function getPrevDate(date){const i=ALL_DATES.indexOf(date);return(i>=0&&i<ALL_DATES.length-1)?ALL_DATES[i+1]:null;}
+function getNDaysAgo(date,n){
+  const i=ALL_DATES.indexOf(date);
+  return(i>=0)?ALL_DATES[Math.min(i+n,ALL_DATES.length-1)]:null;
+}
+function getYTDStart(date){
+  const yr=date.slice(0,4);
+  return[...ALL_DATES].reverse().find(d=>d.startsWith(yr))||null;
+}
+function getChgBetween(sid,dateA,dateB){
+  // A=최근, B=과거. A 기준 대비 B
+  const cur=getPrice(sid,dateA),base=getPrice(sid,dateB);
+  if(cur==null||base==null||base===0) return null;
+  return{pct:(cur-base)/base*100,abs:cur-base};
+}
+function getChg(sid,date){return getChgBetween(sid,date,getPrevDate(date));}
+
+// 시가총액 USD (빌리언)
+function getMarketCapUSD(sid, price){
+  if(price==null) return null;
+  const prof=profileData[sid];
+  if(!prof||!prof.shares||prof.shares===0) return null;
+  // shares는 백만주 단위 → USD 빌리언 = price * shares / 1000
+  return price * prof.shares / 1000;
+}
+// 시가총액 KRW (억 단위)
+function getMarketCapKRW(sid, price){
+  const usdB=getMarketCapUSD(sid,price);
+  if(usdB==null) return null;
+  return Math.round(usdB * 1000 * 1_000_000 * exchangeRate / 1_0000_0000);
+}
+function fmtCapUSD(b){
+  if(b==null) return '—';
+  if(b>=1000) return (b/1000).toFixed(1)+'T';
+  return b.toFixed(1)+'B';
+}
+function fmtCapKRW(억){
+  if(억==null) return '—';
+  if(억>=10000) return (억/10000).toFixed(1)+'조';
+  return Math.round(억).toLocaleString()+'억';
+}
+function getPeriodChgDetail(sid,date){
+  const pd=getNDaysAgo(date,detailPeriodDays);
+  return getChgBetween(sid,date,pd);
+}
+// 테이블용: baseDate 대비 compareDate
+function getTableChg(sid){return getChgBetween(sid,tableBaseDate,tableCompareDate);}
+
+function sectorAvgChg(sec,date){
+  // 시가총액 가중평균 (전일대비)
+  let ws=0,tc=0;
+  sec.stocks.forEach(st=>{
+    const chg=getChg(st.id,date);
+    const cap=getMarketCapUSD(st.id,getPrice(st.id,date));
+    if(chg!=null&&cap!=null&&cap>0){ws+=chg.pct*cap;tc+=cap;}
+  });
+  return tc>0?ws/tc:null;
+}
+// 섹터 평균: 특정 두 날짜 사이
+function sectorAvgBetween(sec,dA,dB){
+  // 시가총액 가중평균
+  let weightedSum=0, totalCap=0;
+  sec.stocks.forEach(st=>{
+    const chg=getChgBetween(st.id,dA,dB);
+    const price=getPrice(st.id,dA);
+    const cap=getMarketCapUSD(st.id,price);
+    if(chg!=null && cap!=null && cap>0){
+      weightedSum+=chg.pct*cap;
+      totalCap+=cap;
+    }
+  });
+  return totalCap>0?weightedSum/totalCap:null;
+}
+// 섹터 합산 시총 (USD 빌리언)
+function sectorTotalCapB(sec,date){
+  let total=0;
+  sec.stocks.forEach(st=>{
+    const cap=getMarketCapUSD(st.id,getPrice(st.id,date));
+    if(cap!=null) total+=cap;
+  });
+  return total>0?total:null;
+}
+
+function badgeCls(v){if(v==null)return'flat';return v>0?'up':v<0?'dn':'flat';}
+function fmtPct(v){if(v==null)return'—';return(v>=0?'+':'')+v.toFixed(2)+'%';}
+function fmtPrice(p){return p!=null?'$'+p.toFixed(2):'—';}
+
+// ── CALENDAR ──
+function moveMonth(d){
+  calMonth+=d;
+  if(calMonth>11){calMonth=0;calYear++;}
+  if(calMonth<0){calMonth=11;calYear--;}
+  if(calYear<2025){calYear=2025;calMonth=0;}
+  if(calYear>2030){calYear=2030;calMonth=11;}
+  renderCalendar();
+}
+function renderCalendar(){
+  const KO=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  document.getElementById('calMonthLabel').textContent=`${calYear}년 ${KO[calMonth]}`;
+  const firstDay=new Date(calYear,calMonth,1).getDay();
+  const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
+  let html='';
+  for(let i=0;i<firstDay;i++) html+=`<div class="cal-cell empty"></div>`;
+  for(let day=1;day<=daysInMonth;day++){
+    const mm=String(calMonth+1).padStart(2,'0'),dd=String(day).padStart(2,'0');
+    const ds=`${calYear}-${mm}-${dd}`;
+    const dow=(firstDay+day-1)%7;
+    const isToday=ds===TODAY,isSat=dow===6,isSun=dow===0;
+    const isTrading=ALL_DATES.includes(ds);
+    const hasData=isTrading&&SECTORS.some(sec=>sec.stocks.some(st=>getPrice(st.id,ds)!=null));
+    let cls='cal-cell';
+    if(isToday) cls+=' today';
+    if(isSat) cls+=' weekend-sat';
+    if(isSun) cls+=' weekend-sun';
+    if(hasData) cls+=' has-data';
+    if(selectedDate===ds) cls+=' selected';
+    let tags='';
+    if(hasData){
+      tags='<div class="cal-sectors">';
+      SECTORS.forEach(sec=>{
+        const avg=sectorAvgChg(sec,ds);
+        if(avg==null) return;
+        tags+=`<div class="cal-sector-tag ${badgeCls(avg)}">${sec.short} ${avg>=0?'+':''}${avg.toFixed(1)}%</div>`;
+      });
+      tags+='</div>';
+    }
+    const oc=isTrading?`onclick="openDetail('${ds}')"`:''
+    html+=`<div class="${cls}" ${oc}><div class="cal-day">${day}</div>${tags}</div>`;
+  }
+  const rem=(firstDay+daysInMonth)%7;
+  if(rem>0) for(let i=0;i<7-rem;i++) html+=`<div class="cal-cell empty"></div>`;
+  document.getElementById('calGrid').innerHTML=html;
+}
+
+// ── DETAIL ──
+function openDetail(date){
+  selectedDate=date;
+  document.getElementById('detailSheet').classList.add('open');
+  document.getElementById('detailDateLabel').textContent=date;
+  renderDetail();
+  renderCalendar();
+}
+function closeDetail(){document.getElementById('detailSheet').classList.remove('open');}
+function setDetailPeriod(days,btn){
+  detailPeriodDays=days;save();
+  document.querySelectorAll('.dperiod-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderDetail();
+}
+function renderDetail(){
+  const d=selectedDate;
+  let html='';
+  SECTORS.forEach(sec=>{
+    const pd=getNDaysAgo(d,detailPeriodDays);
+    const avg=sectorAvgChg(sec,d);
+    const pavg=sectorAvgBetween(sec,d,pd);
+    const sorted=[...sec.stocks].sort((a,b)=>{
+      const ca=getChg(a.id,d),cb=getChg(b.id,d);
+      if(!ca&&!cb)return 0;if(!ca)return 1;if(!cb)return -1;return cb.pct-ca.pct;
+    });
+    html+=`<div class="detail-sector">
+      <div class="detail-sector-head">
+        <span class="detail-sector-name">${sec.name}</span>
+        <div class="detail-badges">
+          <span class="badge-lbl">전일</span><span class="badge ${badgeCls(avg)}">${fmtPct(avg)}</span>
+          <span class="badge-lbl">기간</span><span class="badge ${badgeCls(pavg)}">${fmtPct(pavg)}</span>
+        </div>
+      </div>`;
+    sorted.forEach(st=>{
+      const p=getPrice(st.id,d),chg=getChg(st.id,d),pchg=getPeriodChgDetail(st.id,d);
+      html+=`<div class="detail-stock">
+        <div class="ds-l"><span class="ds-ticker">${st.ticker}</span><span class="ds-name">${st.name}</span></div>
+        <div class="ds-r">
+          <span class="ds-price">${fmtPrice(p)}</span>
+          <div class="chg-row">
+            <span class="mbadge ${badgeCls(chg?chg.pct:null)}">${fmtPct(chg?chg.pct:null)}</span>
+            <span class="mbadge sec ${badgeCls(pchg?pchg.pct:null)}">${fmtPct(pchg?pchg.pct:null)}</span>
+          </div>
+        </div>
+      </div>`;
+    });
+    html+='</div>';
+  });
+  if(!html) html=`<div style="text-align:center;padding:40px;color:var(--text3);font-family:var(--mono);font-size:.78rem">데이터 없음<br><br><span>↻ 버튼으로 갱신하세요</span></div>`;
+  document.getElementById('detailContent').innerHTML=html;
+}
+
+// ── TABLE ──
+function onTableDateChange(){
+  tableBaseDate=document.getElementById('tableBaseDateInput').value||TODAY;
+  tableCompareDate=document.getElementById('tableCompareDateInput').value||tableBaseDate;
+  // 종료일은 시작일보다 이전일 수 없음
+  if(tableCompareDate<tableBaseDate){
+    tableCompareDate=tableBaseDate;
+    document.getElementById('tableCompareDateInput').value=tableCompareDate;
+    toast('종료일은 시작일보다 이전일 수 없습니다');
+  }
+  save();renderTable();
+}
+function setQuickRange(n){
+  // 시작=과거, 종료=오늘
+  tableCompareDate=TODAY;
+  let start;
+  if(n==='ytd') start=getYTDStart(TODAY)||TODAY;
+  else start=getNDaysAgo(TODAY,n)||TODAY;
+  tableBaseDate=start;
+  document.getElementById('tableBaseDateInput').value=tableBaseDate;
+  document.getElementById('tableCompareDateInput').value=tableCompareDate;
+  save();renderTable();
+}
+function renderTable(){
+  document.getElementById('tableBaseDateInput').value=tableBaseDate;
+  document.getElementById('tableCompareDateInput').value=tableCompareDate;
+  const dA=tableBaseDate,dB=tableCompareDate;
+  let html='';
+  // 컬럼 헤더
+  html+=`<div style="display:flex;align-items:center;padding:5px 12px;gap:4px;background:rgba(15,21,32,.8);border-bottom:1px solid var(--border)">
+    <div style="min-width:70px;font-family:var(--mono);font-size:.52rem;color:var(--text3)">종목</div>
+    <div style="flex:1;text-align:center;font-family:var(--mono);font-size:.52rem;color:var(--text3)">시총 USD</div>
+    <div style="flex:1;text-align:center;font-family:var(--mono);font-size:.52rem;color:var(--text3)">시총 KRW</div>
+    <div style="min-width:72px;text-align:right;font-family:var(--mono);font-size:.52rem;color:var(--text3)">현재가</div>
+  </div>`;
+
+  SECTORS.forEach(sec=>{
+    const secAvg=sectorAvgBetween(sec,dA,dB);
+    const secCapB=sectorTotalCapB(sec,dB);
+    const sorted=[...sec.stocks].sort((a,b)=>{
+      const ca=getChgBetween(a.id,dA,dB),cb=getChgBetween(b.id,dA,dB);
+      if(!ca&&!cb)return 0;if(!ca)return 1;if(!cb)return -1;return cb.pct-ca.pct;
+    });
+    html+=`<div class="table-section">
+      <div class="table-section-title" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <span>${sec.name}</span>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+          <span class="mbadge ${badgeCls(secAvg)}" style="font-size:.64rem">${fmtPct(secAvg)}</span>
+          ${secCapB!=null?`<span style="font-family:var(--mono);font-size:.5rem;color:var(--text3)">합산 ${fmtCapUSD(secCapB)}</span>`:''}
+        </div>
+      </div>`;
+    sorted.forEach(st=>{
+      const price=getPrice(st.id,dB);
+      const chg=getChgBetween(st.id,dB,dA);
+      const capUSD=getMarketCapUSD(st.id,price);
+      const capKRW=getMarketCapKRW(st.id,price);
+      html+=`<div class="table-row">
+        <div class="tr-l"><span class="tr-ticker">${st.ticker}</span><span class="tr-name">${st.name}</span></div>
+        <div class="tr-m" style="border-left:1px solid rgba(28,42,62,.7)">
+          <span class="tr-cap-label">USD</span>
+          <span class="tr-cap" style="color:var(--text2)">${fmtCapUSD(capUSD)}</span>
+        </div>
+        <div class="tr-m" style="border-left:1px solid rgba(28,42,62,.7);border-right:1px solid rgba(28,42,62,.7)">
+          <span class="tr-cap-label">KRW</span>
+          <span class="tr-cap">${fmtCapKRW(capKRW)}</span>
+        </div>
+        <div class="tr-r">
+          <span class="tr-price">${fmtPrice(price)}</span>
+          <span class="mbadge ${badgeCls(chg?chg.pct:null)}">${fmtPct(chg?chg.pct:null)}</span>
+        </div>
+      </div>`;
+    });
+    html+='</div><div class="divider"></div>';
+  });
+  document.getElementById('tableContent').innerHTML=html;
+}
+
+// ── CHART ──
+const CHART_COLORS=['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+
+function renderChartTabs(){
+  // 첫 탭 = 섹터별, 나머지 = 개별 섹터
+  const tabs=['섹터별',...SECTORS.map(s=>s.short)];
+  document.getElementById('chartTabs').innerHTML=tabs.map(t=>
+    `<button class="chart-tab ${t===selectedChartTab?'active':''}" onclick="selectChartTab('${t}')">${t}</button>`
+  ).join('');
+}
+function selectChartTab(t){selectedChartTab=t;renderChartTabs();renderChart();}
+function renderChart(){
+  if(chartInstance){chartInstance.destroy();chartInstance=null;}
+
+  // 실제 데이터 있는 날짜만 (오래된순)
+  const allSorted=[...ALL_DATES].sort();
+  const hasAnyData=d=>SECTORS.some(sec=>sec.stocks.some(st=>getPrice(st.id,d)!=null));
+  const dates=allSorted.filter(hasAnyData);
+
+  let datasets, yLabel;
+
+  if(selectedChartTab==='섹터별'){
+    // 달력과 동일: 섹터별 시총가중 전일대비 등락률
+    datasets=SECTORS.map((sec,i)=>({
+      label:sec.short,
+      data:dates.map(d=>{
+        // sectorAvgChg: 시총가중 전일대비 등락률
+        const avg=sectorAvgChg(sec,d);
+        return avg!=null?parseFloat(avg.toFixed(2)):null;
+      }),
+      borderColor:CHART_COLORS[i%CHART_COLORS.length],
+      tension:.3,
+      pointRadius:dates.length<=3?6:dates.length<=10?4:0,
+      pointHoverRadius:5,
+      fill:false,spanGaps:false,borderWidth:2,
+    }));
+    yLabel=v=>(v>=0?'+':'')+v+'%';
+
+  } else {
+    const sec=SECTORS.find(s=>s.short===selectedChartTab||s.name===selectedChartTab);
+    if(!sec) return;
+    const secDates=allSorted.filter(d=>sec.stocks.some(st=>getPrice(st.id,d)!=null));
+    datasets=sec.stocks.map((st,i)=>({
+      label:st.ticker,
+      data:secDates.map(d=>getPrice(st.id,d)),
+      borderColor:CHART_COLORS[i%CHART_COLORS.length],
+      tension:.3,
+      pointRadius:secDates.length<=3?6:secDates.length<=10?4:0,
+      pointHoverRadius:5,fill:false,spanGaps:false,borderWidth:1.5,
+    }));
+    // 섹터별이 아닐 때 dates를 secDates로
+    dates.splice(0,dates.length,...secDates);
+    yLabel=v=>'$'+v;
+  }
+
+  // 데이터 없으면 안내 메시지
+  if(dates.length===0){
+    const ctx=document.getElementById('myChart').getContext('2d');
+    ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+    ctx.fillStyle='#475569';
+    ctx.font='14px DM Mono';
+    ctx.textAlign='center';
+    ctx.fillText('데이터가 없습니다',ctx.canvas.width/2,ctx.canvas.height/2);
+    return;
+  }
+
+  chartInstance=new Chart(document.getElementById('myChart').getContext('2d'),{
+    type:'line',
+    data:{
+      labels:dates.map(d=>d.slice(5).replace('-','/')),
+      datasets,
+    },
+    options:{
+      responsive:true,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{labels:{color:'#94a3b8',font:{family:'DM Mono',size:10},boxWidth:12}},
+        tooltip:{
+          backgroundColor:'#0f1520',titleColor:'#3b82f6',
+          bodyColor:'#f1f5f9',borderColor:'#1c2a3e',borderWidth:1,
+          callbacks:{
+            label:ctx=>{
+              const v=ctx.parsed.y;
+              if(v==null) return null;
+              const s=selectedChartTab==='섹터별'?(v>=0?'+':'')+v.toFixed(2)+'%':'$'+v;
+              return ` ${ctx.dataset.label}: ${s}`;
+            }
+          }
+        },
+        // 0% 기준선 플러그인 (섹터별만)
+        ...(selectedChartTab==='섹터별'?{
+          annotation:{
+            annotations:{
+              zeroLine:{type:'line',yMin:0,yMax:0,borderColor:'rgba(255,255,255,.15)',borderWidth:1}
+            }
+          }
+        }:{})
+      },
+      scales:{
+        x:{ticks:{color:'#475569',font:{family:'DM Mono',size:9},maxTicksLimit:10},grid:{color:'#1c2a3e'}},
+        y:{ticks:{color:'#475569',font:{family:'DM Mono',size:9},callback:yLabel},grid:{color:'#1c2a3e'}}
+      }
+    }
+  });
+}
+
+// ── DATA CALENDAR MODAL ──
+let dcalYear=2026, dcalMonth=4;
+
+function openDataCal(){
+  const now=new Date();
+  dcalYear=now.getFullYear(); dcalMonth=now.getMonth();
+  document.getElementById('dataCalModal').classList.add('open');
+  renderDcal();
+}
+function closeDataCal(){document.getElementById('dataCalModal').classList.remove('open');}
+function moveDcalMonth(d){
+  dcalMonth+=d;
+  if(dcalMonth>11){dcalMonth=0;dcalYear++;}
+  if(dcalMonth<0){dcalMonth=11;dcalYear--;}
+  renderDcal();
+}
+function hasDataForDate(dateStr){
+  // remotePrices 또는 prices에 해당 날짜 데이터가 하나라도 있으면 true
+  const rp=remotePrices[dateStr], lp=prices[dateStr];
+  return (rp&&Object.keys(rp).length>0)||(lp&&Object.keys(lp).length>0);
+}
+function renderDcal(){
+  const KO=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  document.getElementById('dcalMonthLabel').textContent=`${dcalYear}년 ${KO[dcalMonth]}`;
+  const firstDay=new Date(dcalYear,dcalMonth,1).getDay();
+  const daysInMonth=new Date(dcalYear,dcalMonth+1,0).getDate();
+  let html='', savedCount=0;
+  for(let i=0;i<firstDay;i++) html+=`<div class="dcal-cell empty"></div>`;
+  for(let day=1;day<=daysInMonth;day++){
+    const mm=String(dcalMonth+1).padStart(2,'0'), dd=String(day).padStart(2,'0');
+    const ds=`${dcalYear}-${mm}-${dd}`;
+    const dow=(firstDay+day-1)%7;
+    const isToday=ds===TODAY, isSat=dow===6, isSun=dow===0;
+    const hasData=hasDataForDate(ds);
+    if(hasData) savedCount++;
+    let cls='dcal-cell';
+    if(isSun) cls+=' weekend-sun';
+    if(isSat) cls+=' weekend-sat';
+    if(isToday) cls+=' today-cell';
+    if(hasData) cls+=' has-data';
+    html+=`<div class="${cls}">
+      <span class="dcal-day-num">${day}</span>
+      ${hasData?'<span class="dcal-saved-label">저장됨</span>':''}
+    </div>`;
+  }
+  const rem=(firstDay+daysInMonth)%7;
+  if(rem>0) for(let i=0;i<7-rem;i++) html+=`<div class="dcal-cell empty"></div>`;
+  document.getElementById('dcalGrid').innerHTML=html;
+  // 이번달 통계
+  const allSaved=new Set([...Object.keys(remotePrices),...Object.keys(prices)]);
+  document.getElementById('dcalStat').textContent=
+    `이번달 ${savedCount}일 저장 · 전체 ${allSaved.size}일 저장됨`;
+}
+
+// ── SETTINGS ──
+function renderSettings(){
+  const allDates=new Set([...Object.keys(prices),...Object.keys(remotePrices)]);
+  const n=allDates.size;
+  const remoteN=Object.keys(remotePrices).length;
+  document.getElementById('storedLabel').textContent=n+'일 저장 (GitHub '+remoteN+'일)  → 탭해서 확인';
+  document.getElementById('stockCountLabel').textContent=totalStocks+'개 · '+SECTORS.length+'개 섹터';
+}
+function clearData(){if(!confirm('전체 삭제?'))return;prices={};save();renderAll();toast('초기화 완료');}
+
+// ── SYNC ──
+async function onSync(){
+  _cancel=false;
+  const btn=document.getElementById('syncBtn');
+  btn.classList.add('spinning');
+
+  // STEP 1: GitHub data.json 최신 버전 다시 로드
+  showLoad(true,'📡 서버 데이터 불러오는 중...','GitHub Actions 데이터 갱신');
+  try{
+    const r=await fetch('./data.json?t='+Date.now(),{cache:'no-store',headers:{'Cache-Control':'no-cache, no-store, must-revalidate','Pragma':'no-cache'}});
+    if(r.ok){
+      remotePrices=await r.json();
+      const dates=Object.keys(remotePrices).sort().reverse();
+      if(dates[0]) document.getElementById('lastSyncDate').textContent=dates[0];
+    }
+  }catch(e){}
+
+  // STEP 2: 오늘 Finnhub 현재가 갱신
+  showLoad(true,'⚡ 오늘 현재가 갱신 중',TODAY);
+  const allStocks=SECTORS.flatMap(s=>s.stocks);
+  let done=0;
+  for(let i=0;i<allStocks.length;i+=10){
+    if(_cancel)break;
+    await Promise.all(allStocks.slice(i,i+10).map(async st=>{
+      try{
+        const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${st.ticker}&token=${FINNHUB_KEY}`);
+        const q=await r.json();
+        if(q.c&&q.c>0){
+          if(!prices[TODAY]) prices[TODAY]={};
+          prices[TODAY][st.id]=q.c;
+          const pd=getPrevDate(TODAY);
+          if(pd&&!getPrice(st.id,pd)){if(!prices[pd])prices[pd]={};prices[pd][st.id]=q.pc;}
+        }
+      }catch(e){}
+      done++;updateLoad(done,allStocks.length,allStocks[i].ticker);
+    }));
+    if(i+10<allStocks.length)await new Promise(r=>setTimeout(r,600));
+  }
+
+  save();showLoad(false);
+  btn.classList.remove('spinning');
+  document.getElementById('lastSyncDate').textContent=TODAY;
+  renderAll();
+  if(document.getElementById('detailSheet').classList.contains('open'))renderDetail();
+  toast(`✅ 전체 갱신 완료 (누적 ${Object.keys({...prices,...remotePrices}).length}일)`);
+}
+async function onSyncDate(){
+  if(!selectedDate)return onSync();
+  _cancel=false;showLoad(true,'⚡ '+selectedDate+' 갱신 중','');
+  const allStocks=SECTORS.flatMap(s=>s.stocks);let done=0;
+  for(let i=0;i<allStocks.length;i+=10){
+    if(_cancel)break;
+    await Promise.all(allStocks.slice(i,i+10).map(async st=>{
+      try{
+        const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${st.ticker}&token=${FINNHUB_KEY}`);
+        const q=await r.json();
+        if(q.c&&q.c>0){if(!prices[selectedDate])prices[selectedDate]={};prices[selectedDate][st.id]=q.c;}
+      }catch(e){}
+      done++;updateLoad(done,allStocks.length,allStocks[i].ticker);
+    }));
+    if(i+10<allStocks.length)await new Promise(r=>setTimeout(r,600));
+  }
+  save();showLoad(false);renderCalendar();renderDetail();toast('✅ 갱신 완료');
+}
+function showLoad(show,title='',sub=''){
+  document.getElementById('loadOverlay').classList.toggle('show',show);
+  if(show){document.getElementById('loadTitle').textContent=title;document.getElementById('loadSub').textContent=sub;document.getElementById('loadBar').style.width='0%';}
+}
+function updateLoad(done,total,ticker=''){
+  document.getElementById('loadBar').style.width=Math.round(done/total*100)+'%';
+  document.getElementById('loadSub').textContent=`${done}/${total} · ${ticker}`;
+}
+
+// ── VIEW ──
+function switchView(v){
+  currentView=v;
+  document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  const vEl=document.getElementById('view'+v.charAt(0).toUpperCase()+v.slice(1));
+  if(vEl)vEl.classList.add('active');
+  document.getElementById('nav-'+v).classList.add('active');
+  document.getElementById('scrollArea').scrollTop=0;
+  renderAll();
+}
+function renderAll(){
+  if(currentView==='calendar') renderCalendar();
+  else if(currentView==='table') renderTable();
+  else if(currentView==='chart'){renderChartTabs();renderChart();}
+  else if(currentView==='settings') renderSettings();
+}
+function toast(msg){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),2500);
+}
 
 // ── PERSIST ──
 // localStorage는 오늘 현재가(prices)만 저장, 나머지는 data.json 의존
@@ -2400,22 +2967,25 @@ calYear=initNow.getFullYear();calMonth=initNow.getMonth();
 if(calYear<2025){calYear=2025;calMonth=0;}
 if(calYear>2030){calYear=2030;calMonth=11;}
 
-// 이미 인증됐으면 바로 로딩 후 렌더
-if(sessionStorage.getItem('st_auth')==='1'){
-  document.getElementById('pwScreen').style.display='none';
-  (async()=>{
-    showLoad(true,'📡 데이터 불러오는 중...','');
-    await loadRemote(function(p){
-      const bar=document.getElementById('loadBar');
-      const sub=document.getElementById('loadSub');
-      if(bar) bar.style.width=p+'%';
-      if(sub) sub.textContent=p+'%';
-    });
-    showLoad(false);
+// 앱 시작: DOM 준비 후 데이터 로딩
+document.addEventListener('DOMContentLoaded', function(){
+  const overlay = document.getElementById('loadOverlay');
+  const bar = document.getElementById('loadBar');
+  const sub = document.getElementById('loadSub');
+  const title = document.getElementById('loadTitle');
+
+  // 로딩 오버레이 바로 표시
+  if(overlay){ overlay.style.display='flex'; }
+  if(title){ title.textContent='📡 데이터 불러오는 중...'; }
+
+  loadRemote(function(p){
+    if(bar) bar.style.width=p+'%';
+    if(sub) sub.textContent=p+'%';
+  }).then(function(){
+    if(overlay){ overlay.style.display='none'; }
     renderAll();
-  })();
-}
-// 미인증 상태: 비밀번호 화면만 표시, 로딩은 인증 후 pwCheck에서
+  });
+});
 </script>
 </body>
 </html>
