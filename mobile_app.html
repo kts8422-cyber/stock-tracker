@@ -208,6 +208,23 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);overscroll-b
 .load-sub{font-family:var(--mono);font-size:.66rem;color:var(--text3)}
 .load-cancel{font-family:var(--mono);font-size:.63rem;color:var(--text3);cursor:pointer;margin-top:4px;text-decoration:underline}
 
+/* PASSWORD SCREEN */
+#pwScreen{position:fixed;inset:0;z-index:999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+.pw-logo{font-family:var(--mono);font-size:1.4rem;font-weight:500;letter-spacing:-.5px}
+.pw-logo em{color:var(--accent);font-style:normal}
+.pw-label{font-family:var(--mono);font-size:.72rem;color:var(--text3);letter-spacing:.5px}
+.pw-dots{display:flex;gap:12px;margin:4px 0}
+.pw-dot{width:12px;height:12px;border-radius:50%;background:var(--border);transition:background .15s}
+.pw-dot.filled{background:var(--accent)}
+.pw-error{font-family:var(--mono);font-size:.68rem;color:var(--red);height:16px}
+.pw-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:240px}
+.pw-btn{height:68px;border-radius:14px;border:1px solid var(--border);background:var(--card);color:var(--text);font-family:var(--mono);font-size:1.3rem;font-weight:500;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;-webkit-user-select:none;user-select:none}
+.pw-btn:active{background:var(--accent-dim);border-color:var(--accent);transform:scale(.95)}
+.pw-btn .sub{font-size:.48rem;color:var(--text3);letter-spacing:.5px}
+.pw-btn.del{color:var(--text2)}
+.pw-btn.empty{border-color:transparent;background:transparent;cursor:default}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}
+
 /* DATA CALENDAR MODAL */
 #dataCalModal{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);
   z-index:300;display:none;align-items:flex-end;justify-content:center}
@@ -283,6 +300,33 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);overscroll-b
 </style>
 </head>
 <body>
+<!-- PASSWORD SCREEN -->
+<div id="pwScreen">
+  <div class="pw-logo">SECTOR<em>TRACK</em></div>
+  <div class="pw-label">비밀번호를 입력하세요</div>
+  <div class="pw-dots" id="pwDots">
+    <div class="pw-dot" id="d0"></div>
+    <div class="pw-dot" id="d1"></div>
+    <div class="pw-dot" id="d2"></div>
+    <div class="pw-dot" id="d3"></div>
+  </div>
+  <div class="pw-error" id="pwError"></div>
+  <div class="pw-pad" id="pwPad">
+    <button class="pw-btn" data-num="1">1</button>
+    <button class="pw-btn" data-num="2">2<span class="sub">ABC</span></button>
+    <button class="pw-btn" data-num="3">3<span class="sub">DEF</span></button>
+    <button class="pw-btn" data-num="4">4<span class="sub">GHI</span></button>
+    <button class="pw-btn" data-num="5">5<span class="sub">JKL</span></button>
+    <button class="pw-btn" data-num="6">6<span class="sub">MNO</span></button>
+    <button class="pw-btn" data-num="7">7<span class="sub">PQRS</span></button>
+    <button class="pw-btn" data-num="8">8<span class="sub">TUV</span></button>
+    <button class="pw-btn" data-num="9">9<span class="sub">WXYZ</span></button>
+    <div class="pw-btn empty"></div>
+    <button class="pw-btn" data-num="0">0</button>
+    <button class="pw-btn del" id="pwDelBtn">⌫</button>
+  </div>
+</div>
+
 <div class="app">
   <div class="app-header">
     <div class="app-logo">SECTOR<em>TRACK</em></div>
@@ -2974,17 +3018,74 @@ document.addEventListener('DOMContentLoaded', function(){
   const sub = document.getElementById('loadSub');
   const title = document.getElementById('loadTitle');
 
-  // 로딩 오버레이 바로 표시
-  if(overlay){ overlay.style.display='flex'; }
-  if(title){ title.textContent='📡 데이터 불러오는 중...'; }
+  // ── 비밀번호 ──
+  const PW = '8282';
+  let pwVal = '';
 
-  loadRemote(function(p){
-    if(bar) bar.style.width=p+'%';
-    if(sub) sub.textContent=p+'%';
-  }).then(function(){
-    if(overlay){ overlay.style.display='none'; }
-    renderAll();
-  });
+  function pwDots(){
+    for(let i=0;i<4;i++){
+      const d=document.getElementById('d'+i);
+      if(d) d.classList.toggle('filled', i<pwVal.length);
+    }
+  }
+
+  function pwCheck(){
+    if(pwVal === PW){
+      sessionStorage.setItem('st_auth','1');
+      // 비밀번호 화면 숨기고 로딩 시작
+      const screen = document.getElementById('pwScreen');
+      if(screen) screen.style.display='none';
+      startLoading();
+    } else {
+      const e = document.getElementById('pwError');
+      if(e) e.textContent='비밀번호가 틀렸습니다';
+      try{ if(navigator.vibrate) navigator.vibrate([100,50,100]); }catch(ex){}
+      const dots = document.getElementById('pwDots');
+      if(dots){ dots.style.animation='none'; dots.offsetHeight; dots.style.animation='shake .4s ease'; }
+      pwVal = '';
+      setTimeout(pwDots, 400);
+    }
+  }
+
+  // 패드 이벤트
+  const pad = document.getElementById('pwPad');
+  if(pad){
+    pad.addEventListener('touchend', function(e){
+      e.preventDefault();
+      const btn = e.target.closest('[data-num]');
+      if(btn && pwVal.length < 4){ pwVal += btn.getAttribute('data-num'); pwDots(); if(pwVal.length===4) setTimeout(pwCheck,100); }
+    });
+    pad.addEventListener('click', function(e){
+      const btn = e.target.closest('[data-num]');
+      if(btn && pwVal.length < 4){ pwVal += btn.getAttribute('data-num'); pwDots(); if(pwVal.length===4) setTimeout(pwCheck,100); }
+    });
+  }
+  const delBtn = document.getElementById('pwDelBtn');
+  if(delBtn){
+    delBtn.addEventListener('touchend', function(e){ e.preventDefault(); if(pwVal.length){ pwVal=pwVal.slice(0,-1); pwDots(); const er=document.getElementById('pwError'); if(er) er.textContent=''; } });
+    delBtn.addEventListener('click', function(){ if(pwVal.length){ pwVal=pwVal.slice(0,-1); pwDots(); const er=document.getElementById('pwError'); if(er) er.textContent=''; } });
+  }
+
+  // ── 로딩 함수 ──
+  function startLoading(){
+    if(overlay){ overlay.style.display='flex'; }
+    if(title){ title.textContent='📡 데이터 불러오는 중...'; }
+    loadRemote(function(p){
+      if(bar) bar.style.width=p+'%';
+      if(sub) sub.textContent=p+'%';
+    }).then(function(){
+      if(overlay){ overlay.style.display='none'; }
+      renderAll();
+    });
+  }
+
+  // 이미 인증됐으면 바로 로딩, 아니면 비밀번호 화면
+  if(sessionStorage.getItem('st_auth')==='1'){
+    const screen = document.getElementById('pwScreen');
+    if(screen) screen.style.display='none';
+    startLoading();
+  }
+  // 미인증: 비밀번호 화면 표시 (기본 상태)
 });
 </script>
 </body>
