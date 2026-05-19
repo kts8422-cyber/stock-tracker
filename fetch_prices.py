@@ -8,8 +8,14 @@ if not FINNHUB_KEY:
 
 # 미국 동부시간(ET) 기준 - 서머타임 UTC-4
 ET = timezone(timedelta(hours=-4))
-today = datetime.now(ET).strftime("%Y-%m-%d")
-print(f"날짜 (ET): {today}")
+now_et = datetime.now(ET)
+today = now_et.strftime("%Y-%m-%d")
+print(f"날짜 (ET): {today} / 현재시각 (ET): {now_et.strftime('%H:%M')}")
+
+# 장 마감 후(ET 16:00 이후)에만 저장
+if now_et.hour < 16:
+    print(f"⚠️ 장 마감 전 ({now_et.strftime('%H:%M')} ET) - 저장 스킵")
+    import sys; sys.exit(0)
 
 STOCKS = [
   # AI / 빅테크
