@@ -3,8 +3,7 @@ name: Daily Stock Fetch
 
 on:
   schedule:
-    - cron: "0 14 * * 1-5"   # UTC 14:00 = ET 10:00 (장 중반)
-    - cron: "0 22 * * 1-5"   # UTC 22:00 = ET 18:00 (장 마감 후 종가)
+    - cron: "0 21 * * 1-5"   # UTC 21:00 = ET 17:00 (장 마감 후 종가)
   workflow_dispatch:
 
 jobs:
