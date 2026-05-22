@@ -12,10 +12,10 @@ now_et = datetime.now(ET)
 today = now_et.strftime("%Y-%m-%d")
 print(f"날짜 (ET): {today} / 현재시각 (ET): {now_et.strftime('%H:%M')}")
 
-# 장 마감 후(ET 16:00 이후)에만 저장
-if now_et.hour < 16:
-    print(f"⚠️ 장 마감 전 ({now_et.strftime('%H:%M')} ET) - 저장 스킵")
-    import sys; sys.exit(0)
+# 주말이면 저장 스킵
+if now_et.weekday() >= 5:
+    print(f"⚠️ 주말 ({now_et.strftime('%A')}) - 저장 스킵")
+    sys.exit(0)
 
 STOCKS = [
   # AI / 빅테크
